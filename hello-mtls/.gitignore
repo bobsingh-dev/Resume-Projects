@@ -1,0 +1,11 @@
+# ignore all private keys
+*.key
+
+# ignore certificate requests
+*.csr
+
+# ignore serial files
+*.srl
+
+# ignore CA private key explicitly
+certs/ca.key
