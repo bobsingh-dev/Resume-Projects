@@ -1,0 +1,99 @@
+static_resources:
+  listeners:
+    - name: https_ingress
+      address:
+        socket_address:
+          address: 0.0.0.0
+          port_value: 8443
+
+      filter_chains:
+        - transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+              common_tls_context:
+                tls_certificate_sds_secret_configs:
+                  - name: "spiffe://example.org/workload/server"
+                    sds_config:
+                      api_config_source:
+                        api_type: GRPC
+                        grpc_services:
+                          - envoy_grpc:
+                              cluster_name: spire_agent
+
+                validation_context_sds_secret_config:
+                  name: "spiffe://example.org"
+                  sds_config:
+                    api_config_source:
+                      api_type: GRPC
+                      grpc_services:
+                        - envoy_grpc:
+                            cluster_name: spire_agent
+
+              require_client_certificate: true
+
+          filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: ingress
+                route_config:
+                  virtual_hosts:
+                    - name: local_service
+                      domains: ["*"]
+                      routes:
+                        - match:
+                            prefix: "/"
+                          route:
+                            cluster: local_app
+                http_filters:
+                  - name: envoy.filters.http.router
+
+  clusters:
+    - name: local_app
+      connect_timeout: 1s
+      type: logical_dns
+      load_assignment:
+        cluster_name: local_app
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: partB-server
+                      port_value: 8443
+
+      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+          common_tls_context:
+            tls_certificate_sds_secret_configs:
+              - name: "spiffe://example.org/workload/server"
+                sds_config:
+                  api_config_source:
+                    api_type: GRPC
+                    grpc_services:
+                      - envoy_grpc:
+                          cluster_name: spire_agent
+
+            validation_context_sds_secret_config:
+              name: "spiffe://example.org"
+              sds_config:
+                api_config_source:
+                  api_type: GRPC
+                  grpc_services:
+                    - envoy_grpc:
+                        cluster_name: spire_agent
+
+    - name: spire_agent
+      type: static
+      connect_timeout: 1s
+      load_assignment:
+        cluster_name: spire_agent
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    pipe:
+                      path: "/run/spire/sockets/agent.sock"

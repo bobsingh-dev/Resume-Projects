@@ -1,0 +1,83 @@
+services:
+  # ---------- Part A ----------
+  parta-server:
+    build: ./parta-custom-certs/server
+    command: ["./server"]
+    ports:
+      - "8443:8443"
+    volumes:
+      - ./parta-custom-certs/certs:/app/certs:ro
+
+  parta-client:
+    build: ./parta-custom-certs/client
+    command: ["./client"]
+    depends_on:
+      - parta-server
+    volumes:
+      - ./parta-custom-certs/certs:/app/certs:ro
+
+  # ---------- Part B ----------
+  spire-server:
+    image: ghcr.io/spiffe/spire-server:1.9.5
+    command: ["-config", "/spire/server.conf"]
+    volumes:
+      - ./partb-spiffe-spire/spire/server.conf:/spire/server.conf:ro
+      - spire-data:/spire/data
+    ports:
+      - "8081:8081"
+
+  spire-agent:
+    image: ghcr.io/spiffe/spire-agent:1.9.5
+    privileged: true
+    depends_on:
+      - spire-server
+    command: ["-config", "/spire/agent.conf"]
+    volumes:
+      - ./partb-spiffe-spire/spire/agent.conf:/spire/agent.conf:ro
+      - spire-agent-sockets:/run/spire
+
+  partb-server:
+    build: ./partb-spiffe-spire/server
+    environment:
+      - SPIFFE_ENDPOINT_SOCKET=unix:///run/spire/sockets/agent.sock
+    depends_on:
+      - spire-agent
+    volumes:
+      - spire-agent-sockets:/run/spire
+
+  partb-client:
+    build: ./partb-spiffe-spire/client
+    environment:
+      - SPIFFE_ENDPOINT_SOCKET=unix:///run/spire/sockets/agent.sock
+    depends_on:
+      - spire-agent
+      - envoy-server
+    volumes:
+      - spire-agent-sockets:/run/spire
+
+  envoy-server:
+    image: envoyproxy/envoy:v1.31-latest
+    depends_on:
+      - spire-agent
+      - partb-server
+    command: ["-c", "/etc/envoy/server-envoy.yaml", "--log-level", "warning"]
+    ports:
+      - "8444:8443"
+    volumes:
+      - ./partb-spiffe-spire/envoy/server-envoy.yaml:/etc/envoy/server-envoy.yaml:ro
+      - spire-agent-sockets:/run/spire
+
+  envoy-client:
+    image: envoyproxy/envoy:v1.31-latest
+    depends_on:
+      - spire-agent
+    command: ["-c", "/etc/envoy/client-envoy.yaml", "--log-level", "warning"]
+    ports:
+      - "9444:9444"
+    volumes:
+      - ./partb-spiffe-spire/envoy/client-envoy.yaml:/etc/envoy/client-envoy.yaml:ro
+      - spire-agent-sockets:/run/spire
+
+volumes:
+  spire-data: {}
+  spire-agent-sockets: {}
